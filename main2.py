@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from functools import partial
 import os
+from tf_metrics import precision, recall, f1
 
 
 def input_fn(file):
@@ -26,6 +27,7 @@ def input_fn(file):
 
         dataset = tf.data.TextLineDataset(file)
         dataset = dataset.map(_parse_text_line)
+        dataset = dataset.repeat(20)
         dataset = (dataset.padded_batch(
             batch_size=16,
             padded_shapes=({
@@ -79,8 +81,10 @@ def model_fn(features, labels, mode, params):
     weights = tf.sequence_mask(nword)
     metrics = {
         'acc': tf.metrics.accuracy(tags, pred_ids, weights),
+        'precision': precision(tags, pred_ids, num_tags, indices, weights),
+        'recall': recall(tags, pred_ids, num_tags, indices, weights),
+        'f1': f1(tags, pred_ids, num_tags, indices, weights),
     }
-
     for metric_name, op in metrics.items():
         tf.summary.scalar(metric_name, op[1])
 
@@ -94,7 +98,7 @@ def model_fn(features, labels, mode, params):
             mode, loss=loss, eval_metric_ops=metrics)
 
 
-DATADIR = "*"
+DATADIR = "/Users/yongweixing/data/ner"
 
 if __name__ == "__main__":
     params = {
