@@ -6,92 +6,52 @@ import os
 
 def input_fn(file):
     def _parse_text_line(ln):
-        #words_ln, tags_ln = ln.strip().split("\t")
-        words_ln = tf.string_split(
-            tf.expand_dims(tf.string_strip(ln), axis=0), "\t").values[0]
+        pair = tf.string_split(
+            tf.expand_dims(tf.string_strip(ln), axis=0), "\t").values
         tags_ln = tf.string_split(
             tf.expand_dims(tf.string_strip(ln), axis=0), "\t").values[1]
 
-        # words_ln = pair[0]
-        # tags_ln = pair[1]
-
-        words = tf.string_split([words_ln], " ").values
-        tags = tf.string_split([tags_ln], " ").values
-        #words = tf.convert_to_tensor(words_ln.split(), dtype=tf.string)
-        #tags = tf.convert_to_tensor(tags_ln.split(), dtype=tf.string)
-
-        # sess = tf.Session()
-        # print("***********************")
-        # print(sess.run(words))
-        # print(sess.run(tags))
+        words = tf.string_split([pair[0]]).values
+        tags = tf.string_split([pair[1]]).values
 
         features = {
             "words": words,
             "rev_words": tf.reverse(words, axis=[0]),
             "seq_len": tf.cast(tf.shape(words)[0], dtype=tf.int32),
-            #"pair": pair,
-            "words_ln": words_ln
-            #"origin_line": ln,
         }
         d = features, tags
         return d
 
-    #def _input_fn():
+    def _input_fn():
 
-    dataset = tf.data.TextLineDataset(file)
-    dataset = dataset.map(_parse_text_line)
-    dataset = (
-        dataset.padded_batch(
-            batch_size=1,
-            padded_shapes=(
-                {
-                    "words": (None, ),
-                    "rev_words": (None, ),
-                    "seq_len": (),
-                    #"pair": (None, ),
-                    "words_ln": ()
-                    #"origin_line": (),
-                },
-                (None, )),
-            padding_values=(
-                {
-                    "words": "<pad>",
-                    "rev_words": "<pad>",
-                    "seq_len": 0,
-                    #"pair": "",
-                    "words_ln": "",
-                    #"origin_line": "",
-                },
-                "0")))
-    #features, labels = dataset.make_one_shot_iterator().get_next()
-    #return features, labels
-    interator = dataset.make_one_shot_iterator()
-    features, label = interator.get_next()
-    return {
-        "words": features["words"],
-        "seq_len": features["seq_len"],
-        "label": label,
-        #"pair": features["pair"],
-        "words_ln": features["words_ln"]
-    }
-    #return dataset.prefetch(2).make_one_shot_iterator()
+        dataset = tf.data.TextLineDataset(file)
+        dataset = dataset.map(_parse_text_line)
+        dataset = (dataset.padded_batch(
+            batch_size=16,
+            padded_shapes=({
+                "words": (None, ),
+                "rev_words": (None, ),
+                "seq_len": (),
+            }, (None, )),
+            padding_values=({
+                "words": "<pad>",
+                "rev_words": "<pad>",
+                "seq_len": 0,
+            }, "O")))
+        features, labels = dataset.make_one_shot_iterator().get_next()
+        return features, labels
 
-    #return _input_fn
+    return _input_fn
 
 
 def model_fn(features, labels, mode, params):
-    #words, nword = features
-    print(features)
     words = features["words"]
     nword = features["seq_len"]
-    #labels = features["tags"]
     vocab_words = tf.contrib.lookup.index_table_from_file(
         params['words'], num_oov_buckets=params['num_oov_buckets'])
     with open(params['tags']) as f:
         indices = [idx for idx, tag in enumerate(f) if tag.strip() != 'O']
         num_tags = len(indices) + 1
-    print("**********************")
-    print(num_tags)
 
     words_id = vocab_words.lookup(words)
     glove = np.load(params['glove'])['embeddings']
@@ -134,7 +94,7 @@ def model_fn(features, labels, mode, params):
             mode, loss=loss, eval_metric_ops=metrics)
 
 
-DATADIR = "/Users/yongweixing/data/ner"
+DATADIR = "*"
 
 if __name__ == "__main__":
     params = {
@@ -150,34 +110,10 @@ if __name__ == "__main__":
     estimator = tf.estimator.Estimator(
         model_fn, config=cfg, params=params, model_dir="result/model")
 
-    # train_input_fn = partial(input_fn, os.path.join(DATADIR,
-    #                                                 "train.words.txt"),
-    #                          os.path.join(DATADIR, "train.tags.txt"))
-    # eval_input_fn = partial(input_fn, os.path.join(DATADIR, "test.words.txt"),
-    #                         os.path.join(DATADIR, "test.tags.txt"))
-    inputs = input_fn(os.path.join(DATADIR, "train.txt"))
-    sess = tf.Session()
-    for i in range(3):
-        #fea, label = train_input_fn.get_next()
-        #inputs = train_input_fn()
-        #print("original line")
-        #print(sess.run(fea["origin_line"]))
-        #print(sess.run(inputs["pair"]))
-        print(sess.run(inputs["words_ln"]))
-        print("the shape of the words")
-        print(sess.run(tf.shape(inputs["words"])))
-        print(sess.run(inputs["words"]))
-        print("the shape of the tags")
-        print(sess.run(tf.shape(inputs["label"])))
-        print(sess.run(inputs["label"]))
-        print("the value of the seq_len")
-        print(sess.run(inputs["seq_len"]))
-        #print(sess.run(label))
-        # print(sess.run(fea))
-        # print(sess.run(label))
-    # eval_input_fn = input_fn(os.path.join(DATADIR, "test.txt"))
-    # train_spec = tf.estimator.TrainSpec(
-    #     input_fn=train_input_fn, max_steps=10000)
-    # eval_spec = tf.estimator.EvalSpec(input_fn=eval_input_fn)
-    # tf.logging.set_verbosity(tf.logging.INFO)
-    # tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+    train_input_fn = input_fn(os.path.join(DATADIR, "train.txt"))
+    eval_input_fn = input_fn(os.path.join(DATADIR, "test.txt"))
+    train_spec = tf.estimator.TrainSpec(
+        input_fn=train_input_fn, max_steps=10000)
+    eval_spec = tf.estimator.EvalSpec(input_fn=eval_input_fn)
+    tf.logging.set_verbosity(tf.logging.INFO)
+    tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
