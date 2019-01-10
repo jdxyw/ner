@@ -48,6 +48,7 @@ def input_fn(file):
 
 def model_fn(features, labels, mode, params):
     words = features["words"]
+    rev_words = features["words"]
     nword = features["seq_len"]
     vocab_words = tf.contrib.lookup.index_table_from_file(
         params['words'], num_oov_buckets=params['num_oov_buckets'])
@@ -56,20 +57,34 @@ def model_fn(features, labels, mode, params):
         num_tags = len(indices) + 1
 
     words_id = vocab_words.lookup(words)
+    rev_words_id = vocab_words.lookup(rev_words)
     glove = np.load(params['glove'])['embeddings']
     variable = np.vstack([glove, [[0.] * params['dim']]])
     variable = tf.Variable(variable, dtype=tf.float32, trainable=False)
     embeddings_seq = tf.nn.embedding_lookup(variable, words_id)
+    rev_embeddings_seq = tf.nn.embedding_lookup(variable, rev_words_id)
+
+    #cells = []
+    #rev_cells = []
 
     cells = []
-    cell = tf.nn.rnn_cell.LSTMCell(num_units=128)
+    cell = tf.nn.rnn_cell.LSTMCell(num_units=128, name="forward_lstm_cell")
     cells.append(cell)
     cell = tf.nn.rnn_cell.MultiRNNCell(cells=cells)
 
+    rev_cells = []
+    rev_cell = tf.nn.rnn_cell.LSTMCell(
+        num_units=128, name="backward_lstm_cell")
+    rev_cells.append(rev_cell)
+    rev_cell = tf.nn.rnn_cell.MultiRNNCell(cells=rev_cells)
+
     output, _ = tf.nn.dynamic_rnn(
         cell, embeddings_seq, sequence_length=nword, dtype=tf.float32)
+    rev_output, _ = tf.nn.dynamic_rnn(
+        rev_cell, rev_embeddings_seq, sequence_length=nword, dtype=tf.float32)
 
-    logits = tf.layers.dense(output, num_tags)
+    l1 = tf.layers.dense(tf.concat([output, rev_output], axis=-1), 100)
+    logits = tf.layers.dense(l1, num_tags)
     crf_params = tf.get_variable("crf", [num_tags, num_tags], dtype=tf.float32)
     pred_ids, _ = tf.contrib.crf.crf_decode(logits, crf_params, nword)
     vocab_tags = tf.contrib.lookup.index_table_from_file(params['tags'])
@@ -98,7 +113,7 @@ def model_fn(features, labels, mode, params):
             mode, loss=loss, eval_metric_ops=metrics)
 
 
-DATADIR = "/Users/yongweixing/data/ner"
+DATADIR = "*"
 
 if __name__ == "__main__":
     params = {
@@ -117,7 +132,7 @@ if __name__ == "__main__":
     train_input_fn = input_fn(os.path.join(DATADIR, "train.txt"))
     eval_input_fn = input_fn(os.path.join(DATADIR, "test.txt"))
     train_spec = tf.estimator.TrainSpec(
-        input_fn=train_input_fn, max_steps=10000)
+        input_fn=train_input_fn, max_steps=50000)
     eval_spec = tf.estimator.EvalSpec(input_fn=eval_input_fn)
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
