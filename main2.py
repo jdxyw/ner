@@ -9,8 +9,6 @@ def input_fn(file):
     def _parse_text_line(ln):
         pair = tf.string_split(
             tf.expand_dims(tf.string_strip(ln), axis=0), "\t").values
-        tags_ln = tf.string_split(
-            tf.expand_dims(tf.string_strip(ln), axis=0), "\t").values[1]
 
         words = tf.string_split([pair[0]]).values
         tags = tf.string_split([pair[1]]).values
@@ -50,6 +48,7 @@ def model_fn(features, labels, mode, params):
     words = features["words"]
     rev_words = features["words"]
     nword = features["seq_len"]
+    training = (mode == tf.estimator.ModeKeys.TRAIN)
     vocab_words = tf.contrib.lookup.index_table_from_file(
         params['words'], num_oov_buckets=params['num_oov_buckets'])
     with open(params['tags']) as f:
@@ -62,10 +61,11 @@ def model_fn(features, labels, mode, params):
     variable = np.vstack([glove, [[0.] * params['dim']]])
     variable = tf.Variable(variable, dtype=tf.float32, trainable=False)
     embeddings_seq = tf.nn.embedding_lookup(variable, words_id)
+    embeddings_seq = tf.layers.dropout(
+        embeddings_seq, rate=0.5, training=training)
     rev_embeddings_seq = tf.nn.embedding_lookup(variable, rev_words_id)
-
-    #cells = []
-    #rev_cells = []
+    rev_embeddings_seq = tf.layers.dropout(
+        rev_embeddings_seq, rate=0.5, training=training)
 
     cells = []
     cell = tf.nn.rnn_cell.LSTMCell(num_units=128, name="forward_lstm_cell")
@@ -82,8 +82,9 @@ def model_fn(features, labels, mode, params):
         cell, embeddings_seq, sequence_length=nword, dtype=tf.float32)
     rev_output, _ = tf.nn.dynamic_rnn(
         rev_cell, rev_embeddings_seq, sequence_length=nword, dtype=tf.float32)
-
-    l1 = tf.layers.dense(tf.concat([output, rev_output], axis=-1), 100)
+    o = tf.concat([output, rev_output], axis=-1)
+    o = tf.layers.dropout(o, rate=0.5, training=training)
+    l1 = tf.layers.dense(o, 100)
     logits = tf.layers.dense(l1, num_tags)
     crf_params = tf.get_variable("crf", [num_tags, num_tags], dtype=tf.float32)
     pred_ids, _ = tf.contrib.crf.crf_decode(logits, crf_params, nword)
